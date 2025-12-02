@@ -1,0 +1,602 @@
+Relatório: Sistema de Reservas de Cinema
+
+1. Resumo do Tema
+
+O projeto consiste em um Chatbot de Linha de Comando (CLI) baseado em um Autômato Finito Determinístico (DFA) 
+para a reserva de ingressos de cinema. O sistema guia o usuário através de uma sequência linear de estados: 
+escolha do filme, seleção de horário, definição de quantidade e fluxo de pagamento.
+
+O software simula uma experiência de e-commerce simplificada, incluindo validação de entradas (para evitar erros de digitação ou escolhas 
+inválidas), carrinho de compras com cálculo de subtotal e simulação visual de processamento de pagamentos (loading bars). 
+A estrutura de dados principal é um dicionário estático contendo os filmes, preços e horários.
+
+2. Diagrama de Estados (Mermaid)
+
+
+
+3. Tabela de Estados e Transições
+
+Estado Atual                     Entrada do Usuário / Condição                    Ação do Sistema                    Próximo Estado
+
+Início                           ENTER                                            Iniciar sistema                    Seleção de Filme
+
+Início                           n                                                Mensagem de saída                  Fim
+
+Seleção de Filme                 ID do Filme (Válido)                             Salvar filme selecionado           Seleção de Horário
+
+Seleção de Filme                 sair ou n                                        Cancelar operação                  Fim
+
+Seleção de Filme                 ID (Inválido)                                    Mensagem de erro                   Seleção de Filme
+
+Seleção de Horário               Número do Horário                                Salvar horário                     Seleção de Quantidade
+
+Seleção de Quantidade            Número Inteiro > 0                               Calcular subtotal e add            Menu de Decisão
+                                                                                  ao carrinho                        
+Menu de Decisão                  1                                                Reiniciar loop de compra           Seleção de Filme
+
+Menu de Decisão                  2                                                Encerrar compras                   Pagamento
+
+Menu de Decisão                  3                                                Limpar carrinho                    Fim
+
+Pagamento                        1 (Cartão)                                       Solicitar Crédito/Débito           Processamento
+
+Pagamento                        2 (Pix)                                          Gerar código Pix simulado          Processamento
+
+Pagamento                        3 (Dinheiro)                                     Instrução para o caixa             Processamento
+
+Processamento                    (Automático)                                     Exibir barra de loading            Emissão de Comprovante
+
+Emissão de Comprovante           (Automático)                                     Exibir resumo final                Fim
+
+4. Exemplo de Diálogo (Execução Real)
+
+Sistema: Bem-vindo ao sistema de reserva de ingressos!
+Sistema: Aperte ENTER para iniciar ou 'n' para sair
+Usuário: [ENTER]
+Sistema: --- Escolha um filme ---
+[1] Interestelar – R$ 25.00
+[2] Oppenheimer – R$ 28.00
+...
+Sistema: Digite o número do filme desejado (ou 'sair' para encerrar)
+Usuário: 1
+Sistema: Horários disponíveis:
+[1] 14:00
+[2] 17:30
+[3] 20:00
+Sistema: Escolha o horário (digite o número correspondente)
+Usuário: 2
+Sistema: Quantidade de ingressos (digite o número)
+Usuário: 2
+Sistema: Reserva adicionada! Valor desta reserva: R$ 50.00
+Sistema: Total parcial no carrinho: R$ 50.00
+Sistema: O que deseja agora?
+[1] Fazer mais reservas
+[2] Ir para o pagamento
+[3] Cancelar tudo e encerrar
+Usuário: 2
+Sistema: --- RESUMO DAS RESERVAS ---
+Interestelar - 17:30 | 2 ingresso(s) — R$ 50.00
+TOTAL A PAGAR: R$ 50.00
+Sistema: Forma de pagamento:
+[1] Cartão
+[2] PIX
+[3] Dinheiro
+Usuário: 2
+Sistema: Chave PIX gerada! Valor a pagar: R$ 50.00
+Sistema: Confirmando pagamento PIX...
+[####################] 100%
+Sistema: Pagamento confirmado!
+Sistema: Pagamento concluído! Bom filme! 
+
+5. Código em Python
+
+#!/usr/bin/env python3
+# chatbot_ingressos.py
+# Sistema de reservas de ingressos por linha de comando
+# Requisitos: início por ENTER, escolhas numéricas, carrinho, pagamentos com loading.
+
+import time
+import sys
+
+# Base de filmes (id -> título, horários, preço por ingresso)
+FILMES = {
+    1: {"titulo": "Interestelar", "horarios": ["14:00", "17:30", "20:00"], "preco": 25.0},
+    2: {"titulo": "Oppenheimer", "horarios": ["13:00", "16:00", "19:30"], "preco": 28.0},
+    3: {"titulo": "Vingadores: Ultimato", "horarios": ["15:00", "18:30", "21:00"], "preco": 22.0},
+    4: {"titulo": "Homem-Aranha: Sem Volta Para Casa", "horarios": ["14:30", "18:00", "20:30"], "preco": 26.0},
+    5: {"titulo": "Duna 2", "horarios": ["12:00", "15:30", "19:00"], "preco": 30.0},
+    6: {"titulo": "Matrix Resurrections", "horarios": ["13:30", "17:00", "20:30"], "preco": 24.0},
+    7: {"titulo": "Coringa 2", "horarios": ["14:15", "18:15", "21:15"], "preco": 27.0}
+}
+
+def ask(msg):
+    """Lê entrada do usuário e retorna em lower-strip (para facilitar comparações)."""
+    try:
+        return input(msg + "\n> ").lower().strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\nEntrada interrompida. Encerrando atendimento.")
+        sys.exit(0)
+
+def listar_opcoes(titulo, opcoes_dict):
+    print(f"\n--- {titulo} ---")
+    for num, info in opcoes_dict.items():
+        print(f"[{num}] {info['titulo']} – R$ {info['preco']:.2f}")
+    print("----------------")
+
+def listar_horarios(lista):
+    print("\nHorários disponíveis:")
+    for i, h in enumerate(lista, start=1):
+        print(f"[{i}] {h}")
+
+def total_carrinho(carrinho):
+    return sum(item["valor"] for item in carrinho)
+
+def loading_bar(segundos, mensagem):
+    """Mostra uma barra de carregamento com progresso em porcentagem."""
+    print(mensagem)
+    passos = max(1, int(segundos * 10))  # 10 updates por segundo
+    for i in range(passos + 1):
+        porcento = int((i / passos) * 100)
+        hashes = "#" * (porcento // 5)  # 20 caracteres de largura
+        sys.stdout.write(f"\r[{hashes:<20}] {porcento}%")
+        sys.stdout.flush()
+        time.sleep(0.1)
+    print("\n")
+
+def mostrar_resumo(carrinho):
+    print("\n--- RESUMO DAS RESERVAS ---")
+    for idx, item in enumerate(carrinho, start=1):
+        print(f"{idx}. {item['filme']} - {item['horario']} | {item['qtd']} ingresso(s) — R$ {item['valor']:.2f}")
+    total = total_carrinho(carrinho)
+    print(f"\nTOTAL A PAGAR: R$ {total:.2f}")
+    return total
+
+def main():
+    print("Bem-vindo ao sistema de reserva de ingressos!")
+    inicio = ask("Aperte ENTER para iniciar ou 'n' para sair")
+
+    if inicio == "n":
+        print("Atendimento encerrado.")
+        return
+
+    carrinho = []
+
+    while True:
+        # Listar filmes
+        listar_opcoes("Escolha um filme", FILMES)
+        escolha = ask("Digite o número do filme desejado (ou 'sair' para encerrar)")
+
+        if escolha == "sair" or escolha == "n":
+            print("Atendimento encerrado.")
+            return
+
+        if not escolha.isdigit() or int(escolha) not in FILMES:
+            print("Opção inválida. Digite o número do filme desejado.")
+            continue
+
+        escolha = int(escolha)
+        filme = FILMES[escolha]
+
+        # Escolher horário
+        listar_horarios(filme["horarios"])
+        horario_escolha = ask("Escolha o horário (digite o número correspondente)")
+
+        if not horario_escolha.isdigit():
+            print("Horário inválido.")
+            continue
+
+        horario_idx = int(horario_escolha)
+        if horario_idx < 1 or horario_idx > len(filme["horarios"]):
+            print("Horário inválido.")
+            continue
+
+        horario = filme["horarios"][horario_idx - 1]
+
+        # Quantidade
+        qtd = ask("Quantidade de ingressos (digite o número)")
+
+        if not qtd.isdigit() or int(qtd) < 1:
+            print("Quantidade inválida.")
+            continue
+
+        qtd = int(qtd)
+        valor_total_item = qtd * filme["preco"]
+
+        # Adiciona ao carrinho
+        carrinho.append({
+            "filme": filme["titulo"],
+            "horario": horario,
+            "qtd": qtd,
+            "valor": valor_total_item
+        })
+
+        # Mostra subtotal do item e total parcial
+        print(f"\nReserva adicionada! Valor desta reserva: R$ {valor_total_item:.2f}")
+        print(f"Total parcial no carrinho: R$ {total_carrinho(carrinho):.2f}")
+
+        # Menu após adicionar
+        while True:
+            print("\nO que deseja agora?")
+            print("[1] Fazer mais reservas")
+            print("[2] Ir para o pagamento")
+            print("[3] Cancelar tudo e encerrar")
+            op = ask("Escolha uma opção (digite o número)")
+
+            if op == "1":
+                # voltar ao loop principal para adicionar mais
+                break
+            elif op == "2":
+                # seguir para pagamento (sair do loop de reservas)
+                goto_pagamento = True
+                break
+            elif op == "3":
+                print("Todas as reservas foram canceladas.")
+                return
+            else:
+                print("Opção inválida, escolha 1, 2 ou 3.")
+                continue
+
+        if op == "2":
+            break
+        # caso op == "1", o loop principal continua para adicionar mais reservas
+
+    # PAGAMENTO
+    total = mostrar_resumo(carrinho)
+
+    print("\nForma de pagamento:")
+    print("[1] Cartão")
+    print("[2] PIX")
+    print("[3] Dinheiro")
+
+    pg = ask("Escolha uma opção (digite o número)")
+
+    if pg == "1":
+        # Cartão: crédito ou débito
+        print("\nPagamento com cartão:")
+        print("[1] Crédito")
+        print("[2] Débito")
+        tipo = ask("Escolha o tipo (1 ou 2)")
+
+        if tipo not in ["1", "2"]:
+            print("Opção inválida. Usando Débito por padrão.")
+            tipo = "2"
+
+        tipo_str = "Crédito" if tipo == "1" else "Débito"
+        print(f"\nSerá cobrado no seu cartão ({tipo_str}): R$ {total:.2f}")
+        # Simula processamento de 5 segundos
+        loading_bar(5, "\nProcessando pagamento no cartão...")
+        print("Pagamento aprovado!")
+
+    elif pg == "2":
+        # PIX
+        print(f"\nChave PIX gerada! Valor a pagar: R$ {total:.2f}")
+        print("Por favor, faça o pagamento via sua conta PIX para a chave exibida.")
+        loading_bar(5, "\nConfirmando pagamento PIX...")
+        print("Pagamento confirmado!")
+
+    elif pg == "3":
+        # Dinheiro: simula até 2s (caixa)
+        print(f"\nVocê pagará em dinheiro no caixa. Valor a pagar: R$ {total:.2f}")
+        loading_bar(2, "\nAguardando contagem do caixa...")
+        print("Pagamento registrado no caixa!")
+
+    else:
+        # Opção inválida -> tratar como dinheiro por segurança
+        print("Opção inválida. Selecionando Pagamento em Dinheiro por padrão.")
+        loading_bar(2, "\nAguardando contagem do caixa...")
+        print(f"Valor: R$ {total:.2f}")
+
+    # Finaliza mostrando o resumo e comprovante simples
+    print("\n--- COMPROVANTE ---")
+    for i, item in enumerate(carrinho, start=1):
+        print(f"{i}. {item['filme']} - {item['horario']} | {item['qtd']} ingresso(s) — R$ {item['valor']:.2f}")
+    print(f"\nTOTAL PAGO: R$ {total:.2f}")
+    print("\nPagamento concluído! Bom filme! 🎬\n")
+
+if __name__ == "__main__":
+    main()
+
+6. Código em Java
+
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+
+// Classe para representar um item do carrinho
+class ItemCarrinho {
+    String filme;
+    String horario;
+    int qtd;
+    double valor;
+
+    public ItemCarrinho(String filme, String horario, int qtd, double valor) {
+        this.filme = filme;
+        this.horario = horario;
+        this.qtd = qtd;
+        this.valor = valor;
+    }
+}
+
+// Classe para representar os dados do filme
+class Filme {
+    String titulo;
+    List<String> horarios;
+    double preco;
+
+    public Filme(String titulo, String[] horarios, double preco) {
+        this.titulo = titulo;
+        this.horarios = Arrays.asList(horarios);
+        this.preco = preco;
+    }
+}
+
+public class ChatbotIngressos {
+
+    // Base de filmes (Map id -> Filme)
+    private static final Map<Integer, Filme> FILMES = new HashMap<>();
+    private static final Scanner scanner = new Scanner(System.in);
+
+    static {
+        FILMES.put(1, new Filme("Interestelar", new String[]{"14:00", "17:30", "20:00"}, 25.0));
+        FILMES.put(2, new Filme("Oppenheimer", new String[]{"13:00", "16:00", "19:30"}, 28.0));
+        FILMES.put(3, new Filme("Vingadores: Ultimato", new String[]{"15:00", "18:30", "21:00"}, 22.0));
+        FILMES.put(4, new Filme("Homem-Aranha: Sem Volta Para Casa", new String[]{"14:30", "18:00", "20:30"}, 26.0));
+        FILMES.put(5, new Filme("Duna 2", new String[]{"12:00", "15:30", "19:00"}, 30.0));
+        FILMES.put(6, new Filme("Matrix Resurrections", new String[]{"13:30", "17:00", "20:30"}, 24.0));
+        FILMES.put(7, new Filme("Coringa 2", new String[]{"14:15", "18:15", "21:15"}, 27.0));
+    }
+
+    // Função auxiliar equivalente ao ask() do Python
+    private static String ask(String msg) {
+        System.out.println(msg + "\n> ");
+        try {
+            if (scanner.hasNextLine()) {
+                return scanner.nextLine().trim().toLowerCase();
+            }
+            return "";
+        } catch (Exception e) {
+            System.out.println("\nEntrada interrompida. Encerrando atendimento.");
+            System.exit(0);
+            return "";
+        }
+    }
+
+    private static void listarOpcoes(String titulo) {
+        System.out.println("\n--- " + titulo + " ---");
+        // TreeMap para ordenar pelas chaves (Ids)
+        Map<Integer, Filme> filmesOrdenados = new TreeMap<>(FILMES);
+        for (Map.Entry<Integer, Filme> entry : filmesOrdenados.entrySet()) {
+            System.out.printf("[%d] %s – R$ %.2f%n", entry.getKey(), entry.getValue().titulo, entry.getValue().preco);
+        }
+        System.out.println("----------------");
+    }
+
+    private static void listarHorarios(List<String> lista) {
+        System.out.println("\nHorários disponíveis:");
+        for (int i = 0; i < lista.size(); i++) {
+            System.out.printf("[%d] %s%n", (i + 1), lista.get(i));
+        }
+    }
+
+    private static double totalCarrinho(List<ItemCarrinho> carrinho) {
+        double total = 0;
+        for (ItemCarrinho item : carrinho) {
+            total += item.valor;
+        }
+        return total;
+    }
+
+    private static void loadingBar(int segundos, String mensagem) {
+        System.out.println(mensagem);
+        int passos = Math.max(1, segundos * 10); // 10 updates por segundo
+
+        for (int i = 0; i <= passos; i++) {
+            int porcento = (int) (((double) i / passos) * 100);
+            int numHashes = porcento / 5; // 20 caracteres de largura
+            StringBuilder hashes = new StringBuilder();
+
+            for (int h = 0; h < 20; h++) {
+                if (h < numHashes) hashes.append("#");
+                else hashes.append(" ");
+            }
+
+            System.out.printf("\r[%s] %d%%", hashes.toString(), porcento);
+            try {
+                Thread.sleep(100); // 0.1 segundos
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        System.out.println("\n");
+    }
+
+    private static double mostrarResumo(List<ItemCarrinho> carrinho) {
+        System.out.println("\n--- RESUMO DAS RESERVAS ---");
+        int idx = 1;
+        for (ItemCarrinho item : carrinho) {
+            System.out.printf("%d. %s - %s | %d ingresso(s) — R$ %.2f%n", 
+                idx++, item.filme, item.horario, item.qtd, item.valor);
+        }
+        double total = totalCarrinho(carrinho);
+        System.out.printf("\nTOTAL A PAGAR: R$ %.2f%n", total);
+        return total;
+    }
+
+    public static void main(String[] args) {
+        System.out.println("Bem-vindo ao sistema de reserva de ingressos!");
+        String inicio = ask("Aperte ENTER para iniciar ou 'n' para sair");
+
+        if (inicio.equals("n")) {
+            System.out.println("Atendimento encerrado.");
+            return;
+        }
+
+        List<ItemCarrinho> carrinho = new ArrayList<>();
+
+        while (true) {
+            // Escolher Filme
+            listarOpcoes("Escolha um filme");
+            String escolha = ask("Digite o número do filme desejado (ou 'sair' para encerrar)");
+
+            if (escolha.equals("sair") || escolha.equals("n")) {
+                System.out.println("Atendimento encerrado.");
+                return;
+            }
+
+            int idFilme;
+            try {
+                idFilme = Integer.parseInt(escolha);
+                if (!FILMES.containsKey(idFilme)) {
+                    System.out.println("Opção inválida. Digite o número do filme desejado.");
+                    continue;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Opção inválida. Digite um número.");
+                continue;
+            }
+
+            Filme filmeSelecionado = FILMES.get(idFilme);
+
+            // Escolher Horário
+            listarHorarios(filmeSelecionado.horarios);
+            String horarioEscolha = ask("Escolha o horário (digite o número correspondente)");
+
+            int horarioIdx;
+            try {
+                horarioIdx = Integer.parseInt(horarioEscolha);
+                if (horarioIdx < 1 || horarioIdx > filmeSelecionado.horarios.size()) {
+                    System.out.println("Horário inválido.");
+                    continue;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Horário inválido.");
+                continue;
+            }
+
+            String horario = filmeSelecionado.horarios.get(horarioIdx - 1);
+
+            // Quantidade
+            String qtdStr = ask("Quantidade de ingressos (digite o número)");
+            int qtd;
+            try {
+                qtd = Integer.parseInt(qtdStr);
+                if (qtd < 1) {
+                    System.out.println("Quantidade inválida.");
+                    continue;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Quantidade inválida.");
+                continue;
+            }
+
+            double valorTotalItem = qtd * filmeSelecionado.preco;
+
+            // Adiciona ao carrinho
+            carrinho.add(new ItemCarrinho(filmeSelecionado.titulo, horario, qtd, valorTotalItem));
+
+            System.out.printf("\nReserva adicionada! Valor desta reserva: R$ %.2f%n", valorTotalItem);
+            System.out.printf("Total parcial no carrinho: R$ %.2f%n", totalCarrinho(carrinho));
+
+            // Menu Pós-Adição
+            String op = "";
+            boolean sairDoLoop = false;
+
+            while (true) {
+                System.out.println("\nO que deseja agora?");
+                System.out.println("[1] Fazer mais reservas");
+                System.out.println("[2] Ir para o pagamento");
+                System.out.println("[3] Cancelar tudo e encerrar");
+                op = ask("Escolha uma opção (digite o número)");
+
+                if (op.equals("1")) {
+                    break; // volta ao loop principal
+                } else if (op.equals("2")) {
+                    sairDoLoop = true; // vai para pagamento
+                    break;
+                } else if (op.equals("3")) {
+                    System.out.println("Todas as reservas foram canceladas.");
+                    return;
+                } else {
+                    System.out.println("Opção inválida, escolha 1, 2 ou 3.");
+                }
+            }
+
+            if (sairDoLoop) break;
+        }
+
+        // PAGAMENTO
+        double total = mostrarResumo(carrinho);
+
+        System.out.println("\nForma de pagamento:");
+        System.out.println("[1] Cartão");
+        System.out.println("[2] PIX");
+        System.out.println("[3] Dinheiro");
+
+        String pg = ask("Escolha uma opção (digite o número)");
+
+        if (pg.equals("1")) {
+            System.out.println("\nPagamento com cartão:");
+            System.out.println("[1] Crédito");
+            System.out.println("[2] Débito");
+            String tipo = ask("Escolha o tipo (1 ou 2)");
+
+            if (!tipo.equals("1") && !tipo.equals("2")) {
+                System.out.println("Opção inválida. Usando Débito por padrão.");
+                tipo = "2";
+            }
+
+            String tipoStr = tipo.equals("1") ? "Crédito" : "Débito";
+            System.out.printf("\nSerá cobrado no seu cartão (%s): R$ %.2f%n", tipoStr, total);
+            loadingBar(5, "\nProcessando pagamento no cartão...");
+            System.out.println("Pagamento aprovado!");
+
+        } else if (pg.equals("2")) {
+            System.out.printf("\nChave PIX gerada! Valor a pagar: R$ %.2f%n", total);
+            System.out.println("Por favor, faça o pagamento via sua conta PIX para a chave exibida.");
+            loadingBar(5, "\nConfirmando pagamento PIX...");
+            System.out.println("Pagamento confirmado!");
+
+        } else if (pg.equals("3")) {
+            System.out.printf("\nVocê pagará em dinheiro no caixa. Valor a pagar: R$ %.2f%n", total);
+            loadingBar(2, "\nAguardando contagem do caixa...");
+            System.out.println("Pagamento registrado no caixa!");
+
+        } else {
+            System.out.println("Opção inválida. Selecionando Pagamento em Dinheiro por padrão.");
+            loadingBar(2, "\nAguardando contagem do caixa...");
+            System.out.printf("Valor: R$ %.2f%n", total);
+        }
+
+        // Comprovante
+        System.out.println("\n--- COMPROVANTE ---");
+        int i = 1;
+        for (ItemCarrinho item : carrinho) {
+            System.out.printf("%d. %s - %s | %d ingresso(s) — R$ %.2f%n", 
+                i++, item.filme, item.horario, item.qtd, item.valor);
+        }
+        System.out.printf("\nTOTAL PAGO: R$ %.2f%n", total);
+        System.out.println("\nPagamento concluído! Bom filme! 🎬\n");
+
+        scanner.close();
+    }
+}
+
+7. Sugestões para Relatório
+
+A. Limitações do Modelo DFA Atual
+
+Rigidez do Fluxo: O usuário deve seguir a ordem estrita (Filme -> Horário -> Quantidade). Ele não 
+pode dizer "Quero 2 ingressos para Interestelar" de uma vez.
+Vocabulário Fixo: O sistema quebra se o usuário digitar "duas meias" em vez do número 2, ou se 
+escrever "Oppenheimer" em vez de digitar o ID numérico.
+Ausência de Memória de Longo Prazo: O sistema não lembra do usuário se ele fechar e abrir o programa 
+novamente (sem banco de dados).
+
+B. Propostas de Extensão
+
+Processamento de Linguagem Natural (NLP): Integrar bibliotecas como spaCy ou NLTK para permitir que o 
+usuário digite frases naturais (ex: "Quero ver Duna às 19h").
+Persistência de Dados: Salvar as reservas em um arquivo JSON ou banco de dados SQLite para gerar relatórios 
+de vendas.
+Interface Gráfica: Migrar a lógica para uma interface Web (Flask/Django) ou Desktop (Tkinter/JavaFX).
+Autômato Finito Não-Determinístico (NFA): Permitir caminhos mais flexíveis, como voltar ao menu anterior
+sem cancelar tudo ou editar um item do carrinho antes de pagar.
